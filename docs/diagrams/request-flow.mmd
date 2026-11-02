@@ -1,0 +1,17 @@
+sequenceDiagram
+  autonumber
+  participant B as Browser
+  participant I as ingress-nginx
+  participant F as frontend (nginx)
+  participant A as backend (Express)
+  participant M as MongoDB
+  B->>I: GET http://mern.localhost/records
+  I->>F: path "/" -> Service frontend
+  F-->>B: index.html + JS bundle (SPA routing)
+  B->>I: POST /api/record {name, position, level}
+  I->>A: path "/api" -> Service backend (ready pods only)
+  A->>A: validate payload (400 on error)
+  A->>M: insertOne (app user, pooled connection)
+  M-->>A: insertedId
+  A-->>B: 201 Created
+  Note over A,M: MongoDB down: readiness 503, pod removed from endpoints,<br/>API returns 503, liveness stays OK so no restart loop

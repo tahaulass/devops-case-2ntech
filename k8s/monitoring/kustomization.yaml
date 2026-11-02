@@ -1,0 +1,10 @@
+# Optional observability add-on. Requires kube-prometheus-stack (Prometheus Operator CRDs):
+#   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+#   helm install monitoring prometheus-community/kube-prometheus-stack -n monitoring --create-namespace -f k8s/monitoring/values-kube-prometheus-stack.yaml
+#   kubectl apply -k k8s/monitoring
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: mern
+resources:
+  - podmonitor.yaml
+  - prometheusrule.yaml

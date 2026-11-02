@@ -1,0 +1,68 @@
+# On-demand restore. Not part of the kustomization (must never run automatically).
+#   kubectl -n mern delete job mongo-restore --ignore-not-found
+#   kubectl -n mern apply -f k8s/jobs/mongo-restore-job.yaml
+#   kubectl -n mern logs -f job/mongo-restore
+# Restores the newest backup (LATEST). To pick another one, set BACKUP_FILE below.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mongo-restore
+  namespace: mern
+  labels:
+    app.kubernetes.io/name: mongo-restore
+    app.kubernetes.io/component: backup
+    app.kubernetes.io/part-of: devops-case
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 1800
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mongo-restore
+        app.kubernetes.io/component: backup
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: restore
+          image: mongo:7.0
+          command: ["/bin/bash", "/scripts/restore.sh"]
+          env:
+            - name: MONGODB_URI
+              valueFrom: { secretKeyRef: { name: mongo-root, key: MONGODB_ROOT_URI } }
+            - name: BACKUP_DIR
+              value: /backups
+            - name: BACKUP_FILE
+              value: ""            # empty = newest backup
+            - name: RESTORE_NS
+              value: "employees.*"
+            - name: HOME
+              value: /tmp
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: "1", memory: 512Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: backups, mountPath: /backups, readOnly: true }
+            - { name: scripts, mountPath: /scripts, readOnly: true }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: backups
+          persistentVolumeClaim:
+            claimName: mongo-backups
+        - name: scripts
+          configMap:
+            name: backup-scripts
+        - name: tmp
+          emptyDir: {}

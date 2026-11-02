@@ -1,0 +1,20 @@
+# Small footprint for a laptop cluster.
+alertmanager:
+  alertmanagerSpec:
+    resources: { requests: { cpu: 10m, memory: 32Mi } }
+  # Example: route critical alerts to a webhook (Slack/Teams). Put the real URL in a Secret, not here.
+  # config:
+  #   route: { receiver: webhook, group_by: [alertname] }
+  #   receivers:
+  #     - name: webhook
+  #       slack_configs: [{ api_url_file: /etc/alertmanager/secrets/alert-webhook/url, channel: "#alerts" }]
+prometheus:
+  prometheusSpec:
+    retention: 2d
+    resources: { requests: { cpu: 100m, memory: 400Mi } }
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+grafana:
+  adminPassword: ""   # generated; read it with: kubectl -n monitoring get secret monitoring-grafana -o jsonpath="{.data.admin-password}"
+nodeExporter:
+  enabled: false      # not useful on Docker Desktop

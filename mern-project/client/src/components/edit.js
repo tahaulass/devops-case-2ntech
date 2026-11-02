@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router";
+import { API_URL } from "../api";
 
 export default function Edit() {
  const [form, setForm] = useState({
    name: "",
    position: "",
    level: "",
-   records: [],
  });
  const params = useParams();
  const navigate = useNavigate();
@@ -14,11 +14,12 @@ export default function Edit() {
  useEffect(() => {
    async function fetchData() {
      const id = params.id.toString();
-     const response = await fetch(`http://localhost:5050/record/${params.id.toString()}`);
+     const response = await fetch(`${API_URL}/record/${params.id.toString()}`);
 
      if (!response.ok) {
        const message = `An error has occurred: ${response.statusText}`;
        window.alert(message);
+       navigate("/records");
        return;
      }
 
@@ -29,7 +30,7 @@ export default function Edit() {
        return;
      }
 
-     setForm(record);
+     setForm({ name: record.name, position: record.position, level: record.level });
    }
 
    fetchData();
@@ -53,15 +54,20 @@ export default function Edit() {
    };
 
    // This will send a post request to update the data in the database.
-   await fetch(`http://localhost:5050/record/${params.id}`, {
+   const response = await fetch(`${API_URL}/record/${params.id}`, {
      method: "PATCH",
      body: JSON.stringify(editedPerson),
      headers: {
        'Content-Type': 'application/json'
      },
    });
+   if (!response.ok) {
+     const body = await response.json().catch(() => ({}));
+     window.alert(`Could not update record: ${(body.errors || [body.error || response.statusText]).join(", ")}`);
+     return;
+   }
 
-   navigate("/");
+   navigate("/records");
  }
 
  // This following section will display the form that takes input from the user to update the data.

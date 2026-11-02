@@ -1,0 +1,262 @@
+# CI/CD pipeline
+#   1. validate  : unit tests (backend, frontend, ETL), lint, secret scan, manifest validation
+#   2. build     : build 3 images, vulnerability scan (fails on fixable CRITICAL CVEs),
+#                  push to GHCR (main branch only, tag = commit SHA)
+#   3. e2e-deploy: deploy the exact built images into an ephemeral kind cluster with
+#                  ingress-nginx, run API/ETL/backup-restore checks and Cypress UI tests
+#   4. deploy-prod: render the prod overlay pinned to the commit SHA; applies it only if a
+#                  KUBECONFIG secret is configured and the "production" environment is approved
+# Any failing step stops the pipeline (jobs depend on each other via `needs`).
+name: ci-cd
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/devops-case
+  KUSTOMIZE_VERSION: 5.5.0
+  KUBECONFORM_VERSION: 0.6.7
+
+jobs:
+  validate:
+    name: validate (tests, lint, manifests, secrets)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Secret scan (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            mern-project/server/package-lock.json
+            mern-project/client/package-lock.json
+
+      - name: Backend - install & test
+        working-directory: mern-project/server
+        run: |
+          npm ci
+          npm run lint
+          npm test
+
+      - name: Frontend - install, unit test & build
+        working-directory: mern-project/client
+        env:
+          CYPRESS_INSTALL_BINARY: "0"
+          CI: "true"
+        run: |
+          npm ci
+          npm test
+          npm run build
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: python-project/requirements-dev.txt
+
+      - name: ETL - lint & test
+        working-directory: python-project
+        run: |
+          pip install -r requirements-dev.txt
+          ruff check .
+          pytest -q
+
+      - name: Kubernetes manifests - render & validate
+        run: |
+          curl -sSL https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv${KUSTOMIZE_VERSION}/kustomize_v${KUSTOMIZE_VERSION}_linux_amd64.tar.gz | tar xz
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz | tar xz
+          for overlay in dev prod; do
+            ./kustomize build k8s/overlays/$overlay > /tmp/$overlay.yaml
+            ./kubeconform -strict -summary /tmp/$overlay.yaml
+          done
+          ./kubeconform -strict -summary k8s/jobs/
+
+      - name: Shell scripts - lint
+        run: shellcheck -S warning scripts/*.sh k8s/base/backup/scripts/*.sh
+
+  build:
+    name: build & scan image (${{ matrix.name }})
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - name: backend
+            context: mern-project/server
+          - name: frontend
+            context: mern-project/client
+          - name: etl
+            context: python-project
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          load: true
+          tags: |
+            devops-case/${{ matrix.name }}:local
+            ${{ env.IMAGE_PREFIX }}-${{ matrix.name }}:${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+      - name: Vulnerability scan (fail on fixable CRITICAL)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 (pinned by SHA: third-party action)
+        with:
+          image-ref: devops-case/${{ matrix.name }}:local
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
+
+      - name: Vulnerability report (HIGH, informational)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 (pinned by SHA: third-party action)
+        with:
+          image-ref: devops-case/${{ matrix.name }}:local
+          severity: HIGH
+          ignore-unfixed: true
+          exit-code: "0"
+          format: table
+          skip-setup-trivy: true
+
+      - name: SBOM (CycloneDX)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 (pinned by SHA: third-party action)
+        with:
+          image-ref: devops-case/${{ matrix.name }}:local
+          format: cyclonedx
+          output: sbom-${{ matrix.name }}.cdx.json
+          skip-setup-trivy: true
+
+      - name: Save image for the e2e job
+        run: docker save devops-case/${{ matrix.name }}:local | gzip > image-${{ matrix.name }}.tar.gz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: image-${{ matrix.name }}
+          path: |
+            image-${{ matrix.name }}.tar.gz
+            sbom-${{ matrix.name }}.cdx.json
+          retention-days: 3
+
+      - name: Push to GHCR (main only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          IMAGE="$(echo "${IMAGE_PREFIX}-${{ matrix.name }}" | tr '[:upper:]' '[:lower:]')"
+          docker tag devops-case/${{ matrix.name }}:local "$IMAGE:${{ github.sha }}"
+          docker push "$IMAGE:${{ github.sha }}"
+
+  e2e-deploy:
+    name: deploy to ephemeral kind cluster & e2e tests
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: image-*
+          merge-multiple: true
+
+      - name: Create kind cluster
+        uses: helm/kind-action@v1.15.1
+        with:
+          cluster_name: devops-case
+          config: ci/kind-config.yaml
+
+      - name: Load images into the cluster
+        run: |
+          for n in backend frontend etl; do
+            gunzip -c image-$n.tar.gz | docker load
+            kind load docker-image devops-case/$n:local --name devops-case
+          done
+
+      - name: Install ingress-nginx
+        run: |
+          kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.15.1/deploy/static/provider/kind/deploy.yaml
+          kubectl -n ingress-nginx wait --for=condition=ready pod -l app.kubernetes.io/component=controller --timeout=180s
+
+      - name: Create secrets (random, never stored)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./scripts/create-secrets.sh
+
+      - name: Deploy (dev overlay)
+        run: kubectl apply -k k8s/overlays/dev
+
+      - name: End-to-end checks (API, ETL idempotency, backup/restore, resilience)
+        run: ./scripts/e2e-k8s.sh
+
+      - name: UI tests (Cypress)
+        uses: cypress-io/github-action@v6
+        with:
+          working-directory: mern-project/client
+          browser: chrome
+        env:
+          CYPRESS_BASE_URL: http://mern.localhost
+
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          kubectl get all,ingress,pvc,events -n mern
+          kubectl -n mern describe pods
+          kubectl -n mern logs -l app.kubernetes.io/part-of=devops-case --all-containers --tail=200 --prefix
+
+  deploy-prod:
+    name: deploy to production (gated)
+    needs: e2e-deploy
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production   # configure "required reviewers" on this environment for manual approval
+    env:
+      KUBECONFIG_DATA: ${{ secrets.KUBECONFIG }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Render prod manifests pinned to this commit
+        run: |
+          curl -sSL https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv${KUSTOMIZE_VERSION}/kustomize_v${KUSTOMIZE_VERSION}_linux_amd64.tar.gz | tar xz
+          OWNER="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          cd k8s/overlays/prod
+          for n in backend frontend etl; do
+            ../../../kustomize edit set image "$n=ghcr.io/$OWNER/devops-case-$n:${{ github.sha }}"
+          done
+          ../../../kustomize build . > "$GITHUB_WORKSPACE/prod-manifests.yaml"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prod-manifests-${{ github.sha }}
+          path: prod-manifests.yaml
+      - name: Apply to cluster
+        if: env.KUBECONFIG_DATA != ''
+        run: |
+          echo "$KUBECONFIG_DATA" > kubeconfig && export KUBECONFIG=$PWD/kubeconfig
+          kubectl apply -f prod-manifests.yaml
+          kubectl -n mern rollout status deploy/backend --timeout=300s || { kubectl -n mern rollout undo deploy/backend; exit 1; }
+          kubectl -n mern rollout status deploy/frontend --timeout=300s || { kubectl -n mern rollout undo deploy/frontend; exit 1; }
+      - name: No cluster configured
+        if: env.KUBECONFIG_DATA == ''
+        run: echo "KUBECONFIG secret not set - prod manifests rendered and archived, apply skipped."

@@ -1,0 +1,52 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: mern
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: devops-case
+    includeSelectors: false
+
+resources:
+  - namespace.yaml
+  - mongo/statefulset.yaml
+  - mongo/service.yaml
+  - backend/deployment.yaml
+  - backend/service.yaml
+  - backend/pdb.yaml
+  - frontend/deployment.yaml
+  - frontend/service.yaml
+  - frontend/pdb.yaml
+  - ingress.yaml
+  - etl/cronjob.yaml
+  - backup/pvc.yaml
+  - backup/cronjob.yaml
+  - network/networkpolicies.yaml
+
+configMapGenerator:
+  - name: app-config
+    literals:
+      - DB_NAME=employees
+      - LOG_LEVEL=INFO
+  - name: etl-config
+    literals:
+      - GITHUB_REPOS=kubernetes/kubernetes,facebook/react,mongodb/mongo,expressjs/express,python/cpython
+      - ETL_COLLECTION=github_repositories
+  - name: mongo-init
+    files:
+      - mongo/init/01-create-app-user.js
+  - name: backup-scripts
+    options:
+      # fixed name: also referenced by the on-demand restore Job in k8s/jobs/
+      disableNameSuffixHash: true
+    files:
+      - backup/scripts/backup.sh
+      - backup/scripts/restore.sh
+
+# Secrets are NOT generated here and NOT stored in git.
+# They are created out-of-band by scripts/create-secrets.(ps1|sh) (or by a secret manager
+# / External Secrets Operator / Sealed Secrets in a real environment):
+#   mongo-root   : MONGO_INITDB_ROOT_USERNAME, MONGO_INITDB_ROOT_PASSWORD, MONGODB_ROOT_URI
+#   mongo-app    : MONGO_APP_USERNAME, MONGO_APP_PASSWORD, MONGODB_URI
+#   github-token : GITHUB_TOKEN (optional)
+#   alerting     : ALERT_WEBHOOK_URL (optional)

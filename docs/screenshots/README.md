@@ -24,4 +24,4 @@ Teslim kanıtı olarak eklenen ekran görüntülerini bu klasörde saklayın. Do
 - `18-data-restored-verified.png`
 - `19-monitoring-or-upper-criteria.png`
 
-Her görseli repository kökündeki `TESLIM_KANITLARI.md` dosyasında kısa bir açıklamayla ilişkilendirin. Görsellerde gerçek credential, token, parola, private key veya paylaşılmaması gereken hassas bilgiler görünmemelidir.
+Her görseli repository kökündeki `SUBMISSION_EVIDENCE.md` dosyasında kısa bir açıklamayla ilişkilendirin. Görsellerde gerçek credential, token, parola, private key veya paylaşılmaması gereken hassas bilgiler görünmemelidir.

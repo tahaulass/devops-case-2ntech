@@ -1,0 +1,43 @@
+# Lists the backup files on the mongo-backups PVC (read-only), for evidence / troubleshooting.
+#   kubectl -n mern delete job list-backups --ignore-not-found
+#   kubectl apply -f k8s/jobs/list-backups-job.yaml
+#   kubectl -n mern wait --for=condition=complete job/list-backups --timeout=120s
+#   kubectl -n mern logs job/list-backups
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: list-backups
+  namespace: mern
+  labels:
+    app.kubernetes.io/name: list-backups
+    app.kubernetes.io/part-of: devops-case
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: ls
+          image: mongo:7.0
+          command: ["bash", "-c", "echo 'PVC mongo-backups mounted at /backups:'; ls -la /backups; echo; echo -n 'LATEST = '; cat /backups/LATEST; echo; for f in /backups/*.meta; do echo \"$f: $(cat $f)\"; done"]
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { cpu: 100m, memory: 64Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: backups, mountPath: /backups, readOnly: true }
+      volumes:
+        - name: backups
+          persistentVolumeClaim:
+            claimName: mongo-backups

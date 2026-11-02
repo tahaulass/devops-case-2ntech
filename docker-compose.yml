@@ -1,0 +1,70 @@
+# Local development / validation stack. The deployment target is Kubernetes (see k8s/).
+#   cp .env.example .env      # set local passwords (never commit .env)
+#   docker compose up -d --build
+#   open http://localhost:8080
+#   docker compose run --rm etl   # run the ETL once
+name: devops-case
+
+services:
+  mongo:
+    image: mongo:7.0
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:?set in .env}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?set in .env}
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    # Not published to the host: only reachable from the compose network.
+
+  backend:
+    build: ./mern-project/server
+    image: devops-case/backend:local
+    restart: unless-stopped
+    environment:
+      MONGODB_URI: mongodb://${MONGO_ROOT_USERNAME}:${MONGO_ROOT_PASSWORD}@mongo:27017/?authSource=admin
+      DB_NAME: employees
+    depends_on:
+      mongo:
+        condition: service_healthy
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+
+  frontend:
+    build: ./mern-project/client
+    image: devops-case/frontend:local
+    restart: unless-stopped
+    environment:
+      BACKEND_URL: http://backend:5050
+    ports:
+      - "8080:8080"
+    depends_on:
+      - backend
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    tmpfs:
+      - /tmp
+
+  etl:
+    build: ./python-project
+    image: devops-case/etl:local
+    profiles: ["etl"]   # run on demand: docker compose run --rm etl
+    environment:
+      MONGODB_URI: mongodb://${MONGO_ROOT_USERNAME}:${MONGO_ROOT_PASSWORD}@mongo:27017/?authSource=admin
+      DB_NAME: employees
+      GITHUB_REPOS: ${GITHUB_REPOS:-kubernetes/kubernetes,facebook/react,mongodb/mongo,expressjs/express,python/cpython}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+    depends_on:
+      mongo:
+        condition: service_healthy
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+
+volumes:
+  mongo-data:

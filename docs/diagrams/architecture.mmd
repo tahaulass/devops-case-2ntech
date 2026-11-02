@@ -1,0 +1,47 @@
+flowchart LR
+  user([User browser])
+  gh[(GitHub REST API)]
+  ci[[GitHub Actions CI/CD]]
+  ghcr[(GHCR image registry)]
+
+  subgraph cluster[Kubernetes cluster - Docker Desktop / kind]
+    subgraph ingressns[namespace ingress-nginx]
+      ing[ingress-nginx controller<br/>LoadBalancer :80]
+    end
+    subgraph mern[namespace mern - PSS restricted, default-deny NetworkPolicy]
+      ingress{{Ingress mern.localhost<br/>/ and /api}}
+      fesvc[Service frontend<br/>ClusterIP :80]
+      fe[Deployment frontend<br/>nginx-unprivileged, static React build]
+      besvc[Service backend<br/>ClusterIP :5050]
+      be[Deployment backend<br/>Express API x2<br/>/healthz /readyz /metrics]
+      mongosvc[Service mongo<br/>headless]
+      mongo[(StatefulSet mongo-0<br/>MongoDB 7, auth on)]
+      pvcdata[(PVC data-mongo-0)]
+      etl[CronJob github-etl<br/>hourly 0 * * * *]
+      bkp[CronJob mongo-backup<br/>every 6h]
+      rst[Job mongo-restore<br/>on demand]
+      pvcbkp[(PVC mongo-backups)]
+      cfg[/ConfigMaps app-config, etl-config/]
+      sec[/Secrets mongo-root, mongo-app, github-token/]
+    end
+  end
+
+  user -- HTTP --> ing --> ingress
+  ingress -- "/" --> fesvc --> fe
+  ingress -- "/api/*" --> besvc --> be
+  be -- "app user, readWrite employees" --> mongosvc --> mongo
+  mongo --- pvcdata
+  etl -- "GET /repos/..." --> gh
+  etl -- "upsert by github_id" --> mongosvc
+  bkp -- "mongodump root" --> mongosvc
+  bkp -- "archive.gz + sha256" --> pvcbkp
+  rst -- "mongorestore --drop" --> mongosvc
+  pvcbkp --> rst
+  cfg -.-> be
+  cfg -.-> etl
+  sec -.-> be
+  sec -.-> etl
+  sec -.-> mongo
+  ci -- "build, scan, push :sha" --> ghcr
+  ci -- "deploy + e2e in kind" --> cluster
+  ghcr -. "pull images (prod overlay)" .-> be

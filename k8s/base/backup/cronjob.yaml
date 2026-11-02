@@ -1,0 +1,68 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: mongo-backup
+  labels:
+    app.kubernetes.io/name: mongo-backup
+    app.kubernetes.io/component: backup
+spec:
+  schedule: "15 */6 * * *"       # every 6 hours -> RPO <= 6h
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 1800
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 1800
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: mongo-backup
+            app.kubernetes.io/component: backup
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            runAsGroup: 999
+            fsGroup: 999
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: backup
+              image: mongo:7.0      # same version as the server: mongodump/mongorestore included
+              command: ["/bin/bash", "/scripts/backup.sh"]
+              env:
+                - name: MONGODB_URI
+                  valueFrom: { secretKeyRef: { name: mongo-root, key: MONGODB_ROOT_URI } }
+                - name: BACKUP_DIR
+                  value: /backups
+                - name: HOME          # mongosh writes its config/history under $HOME
+                  value: /tmp
+                - name: RETENTION_DAYS
+                  value: "7"
+                - name: ALERT_WEBHOOK_URL
+                  valueFrom: { secretKeyRef: { name: alerting, key: ALERT_WEBHOOK_URL, optional: true } }
+              resources:
+                requests: { cpu: 50m, memory: 128Mi }
+                limits: { cpu: 500m, memory: 512Mi }
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: ["ALL"] }
+              volumeMounts:
+                - { name: backups, mountPath: /backups }
+                - { name: scripts, mountPath: /scripts, readOnly: true }
+                - { name: tmp, mountPath: /tmp }
+          volumes:
+            - name: backups
+              persistentVolumeClaim:
+                claimName: mongo-backups
+            - name: scripts
+              configMap:
+                name: backup-scripts
+            - name: tmp
+              emptyDir: {}

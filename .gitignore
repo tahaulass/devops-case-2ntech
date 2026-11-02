@@ -1,0 +1,18 @@
+# secrets / local config
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+k8s/**/secret*.env
+!k8s/**/secret*.env.example
+# build / deps
+node_modules/
+build/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+# local backups
+backups/
+*.archive.gz

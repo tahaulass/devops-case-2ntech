@@ -1,12 +1,21 @@
-# Python ETL Görevi
+# GitHub → MongoDB ETL
 
-Sağlanan `ETL.py` dosyası başlangıç kodudur ve production-ready değildir. Adaydan bu kodu aşağıdaki sınırlı gereksinimleri karşılayacak şekilde geliştirmesi beklenmektedir:
+`etl.py` fetches repository metadata from the GitHub REST API and upserts it into MongoDB, keyed on the numeric GitHub repository id (`github_id`, unique index). Re-processing a repository updates the existing document (`$set`, `$inc etl_sync_count`) and never creates a duplicate. Runs as the hourly Kubernetes CronJob `github-etl`.
 
-1. GitHub API üzerinden repository bilgileri otomatik olarak alınmalıdır.
-2. Alınan repository bilgileri MongoDB’ye kaydedilmelidir.
-3. Aynı repository sonraki çalışmalarda tekrar alındığında yeni bir kayıt oluşturulmamalıdır.
-4. Mevcut kayıt, GitHub repository kimliği veya adayın gerekçelendirdiği eşdeğer benzersiz bir alan üzerinden güncellenmelidir.
-5. ETL Kubernetes CronJob olarak saatte bir çalıştırılmalıdır.
-6. Çalışma sonucu anlaşılır loglarla gösterilmelidir.
+| Variable | Required | Default | Description |
+| --- | --- | --- | --- |
+| `MONGODB_URI` | yes | – | MongoDB connection string (from Secret `mongo-app`) |
+| `DB_NAME` | no | `employees` | Database |
+| `ETL_COLLECTION` | no | `github_repositories` | Collection |
+| `GITHUB_REPOS` | one of | – | Comma-separated `owner/repo` list |
+| `GITHUB_ORG` | one of | – | Also load all public repos of this organisation |
+| `GITHUB_TOKEN` | no | – | Raises the rate limit from 60 to 5000 requests/hour |
+| `ALERT_WEBHOOK_URL` | no | – | Slack/Teams-compatible webhook, called when a run fails |
 
-Adayın ETL’nin ilk çalışmasını ve aynı repository tekrar işlendiğinde duplicate oluşmadan güncelleme yapıldığını ekran görüntüsü veya terminal çıktısı ile kanıtlaması beklenmektedir. Ayrıntılı kanıt listesi için repository kökündeki `TESLIM_KANITLARI.md` dosyasını inceleyin.
+```bash
+pip install -r requirements-dev.txt && pytest -q && ruff check .   # tests
+docker build -t devops-case/etl:local .                            # image
+kubectl -n mern create job etl-manual --from=cronjob/github-etl    # run now in the cluster
+```
+
+Logs are JSON lines; the final `etl run finished` line contains `fetched`, `inserted`, `updated`, `documents_before`, `documents_after`, `duplicates_created` and `duration_seconds`. Exit code ≠ 0 on failure (Job marked Failed → alert).

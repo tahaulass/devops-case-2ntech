@@ -1,0 +1,27 @@
+# Single external entry point. Only "/" (static UI) and "/api" are routed;
+# /metrics, /healthz, /readyz and MongoDB are not reachable from outside.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mern
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "16k"
+    nginx.ingress.kubernetes.io/limit-rps: "20"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: mern.localhost
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port: { name: http }
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port: { name: http }

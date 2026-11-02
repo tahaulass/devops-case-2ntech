@@ -17,7 +17,7 @@ const App = () => {
       <div style={{ margin: 20 }}>
         <Routes>
           <Route exact path="/" element={<HealthStatus />} />
-          ;<Route exact path="/records" element={<RecordList />} />
+          <Route exact path="/records" element={<RecordList />} />
           <Route path="/edit/:id" element={<Edit />} />
           <Route path="/create" element={<Create />} />
         </Routes>

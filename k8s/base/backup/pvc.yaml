@@ -1,0 +1,13 @@
+# Separate volume for backups so that losing/recreating the database volume does not
+# also destroy the backups. (In production: object storage in another region, see runbook.)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mongo-backups
+  labels:
+    app.kubernetes.io/name: mongo-backup
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 2Gi

@@ -1,0 +1,17 @@
+# Headless Service: gives the StatefulSet pod a stable DNS name
+# (mongo-0.mongo.mern.svc.cluster.local) and "mongo.mern.svc" resolves to the pod IP.
+# Cluster-internal only; never exposed via NodePort/LoadBalancer/Ingress.
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongo
+  labels:
+    app.kubernetes.io/name: mongo
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: mongo
+  ports:
+    - name: mongo
+      port: 27017
+      targetPort: mongo

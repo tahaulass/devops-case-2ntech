@@ -1,62 +1,101 @@
 import express from "express";
-import db from "../db/conn.mjs";
 import { ObjectId } from "mongodb";
 
-const router = express.Router();
+const LEVELS = ["Intern", "Junior", "Senior"];
+const MAX_LEN = 100;
 
-// This section will help you get a list of all the records.
-router.get("/", async (req, res) => {
-  let collection = await db.collection("records");
-  let results = await collection.find({}).toArray();
-  res.send(results).status(200);
-});
+// Express 4 does not catch rejected promises from async handlers. In the starter code an
+// invalid id (e.g. GET /record/abc) made `new ObjectId()` throw inside an async handler,
+// producing an unhandled rejection that terminates Node -> one request could take the API down.
+const asyncHandler = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
-// This section will help you get a single record by id
-router.get("/:id", async (req, res) => {
-  let collection = await db.collection("records");
-  let query = {_id: new ObjectId(req.params.id)};
-  let result = await collection.findOne(query);
+const parseId = (req, res) => {
+  if (!ObjectId.isValid(req.params.id)) {
+    res.status(400).json({ error: "invalid id" });
+    return null;
+  }
+  return new ObjectId(req.params.id);
+};
 
-  if (!result) res.send("Not found").status(404);
-  else res.send(result).status(200);
-});
-
-// This section will help you create a new record.
-router.post("/", async (req, res) => {
-  let newDocument = {
-    name: req.body.name,
-    position: req.body.position,
-    level: req.body.level,
-  };
-  let collection = await db.collection("records");
-  let result = await collection.insertOne(newDocument);
-  res.send(result).status(204);
-});
-
-// This section will help you update a record by id.
-router.patch("/:id", async (req, res) => {
-  const query = { _id: new ObjectId(req.params.id) };
-  const updates =  {
-    $set: {
-      name: req.body.name,
-      position: req.body.position,
-      level: req.body.level
+// Accept only the three known fields, as trimmed strings of bounded length.
+// Prevents arbitrary documents / operator injection being written to the collection.
+export function validateRecord(body) {
+  const errors = [];
+  const out = {};
+  for (const field of ["name", "position"]) {
+    const v = body?.[field];
+    if (typeof v !== "string" || v.trim().length === 0) {
+      errors.push(`${field} is required`);
+    } else if (v.length > MAX_LEN) {
+      errors.push(`${field} must be at most ${MAX_LEN} characters`);
+    } else {
+      out[field] = v.trim();
     }
-  };
+  }
+  if (!LEVELS.includes(body?.level)) {
+    errors.push(`level must be one of ${LEVELS.join(", ")}`);
+  } else {
+    out.level = body.level;
+  }
+  return { errors, value: out };
+}
 
-  let collection = await db.collection("records");
-  let result = await collection.updateOne(query, updates);
-  res.send(result).status(200);
-});
+export default function recordRouter(db) {
+  const router = express.Router();
+  const records = () => db.collection("records");
 
-// This section will help you delete a record
-router.delete("/:id", async (req, res) => {
-  const query = { _id: new ObjectId(req.params.id) };
+  router.get(
+    "/",
+    asyncHandler(async (req, res) => {
+      const results = await records().find({}).limit(1000).toArray();
+      res.status(200).json(results);
+    })
+  );
 
-  const collection = db.collection("records");
-  let result = await collection.deleteOne(query);
+  router.get(
+    "/:id",
+    asyncHandler(async (req, res) => {
+      const id = parseId(req, res);
+      if (!id) return;
+      const result = await records().findOne({ _id: id });
+      if (!result) return res.status(404).json({ error: "not found" });
+      res.status(200).json(result);
+    })
+  );
 
-  res.send(result).status(200);
-});
+  router.post(
+    "/",
+    asyncHandler(async (req, res) => {
+      const { errors, value } = validateRecord(req.body);
+      if (errors.length) return res.status(400).json({ errors });
+      const result = await records().insertOne({ ...value, createdAt: new Date() });
+      res.status(201).json(result);
+    })
+  );
 
-export default router;
+  router.patch(
+    "/:id",
+    asyncHandler(async (req, res) => {
+      const id = parseId(req, res);
+      if (!id) return;
+      const { errors, value } = validateRecord(req.body);
+      if (errors.length) return res.status(400).json({ errors });
+      const result = await records().updateOne({ _id: id }, { $set: { ...value, updatedAt: new Date() } });
+      if (result.matchedCount === 0) return res.status(404).json({ error: "not found" });
+      res.status(200).json(result);
+    })
+  );
+
+  router.delete(
+    "/:id",
+    asyncHandler(async (req, res) => {
+      const id = parseId(req, res);
+      if (!id) return;
+      const result = await records().deleteOne({ _id: id });
+      if (result.deletedCount === 0) return res.status(404).json({ error: "not found" });
+      res.status(200).json(result);
+    })
+  );
+
+  return router;
+}

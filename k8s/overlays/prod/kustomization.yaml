@@ -1,0 +1,46 @@
+# Production-like environment: immutable images from GHCR (tag = git commit SHA set by CI),
+# more replicas, HPA, TLS on the Ingress.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+  - hpa.yaml
+
+images:
+  - name: backend
+    newName: ghcr.io/OWNER/devops-case-backend
+    newTag: latest   # replaced by CI: kustomize edit set image ...:<git-sha>
+  - name: frontend
+    newName: ghcr.io/OWNER/devops-case-frontend
+    newTag: latest
+  - name: etl
+    newName: ghcr.io/OWNER/devops-case-etl
+    newTag: latest
+
+replicas:
+  - name: backend
+    count: 3
+  - name: frontend
+    count: 2
+
+patches:
+  - target: { kind: Ingress, name: mern }
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: mern.example.com
+      - op: add
+        path: /spec/tls
+        value:
+          - hosts: [mern.example.com]
+            secretName: mern-tls   # issued by cert-manager in a real cluster
+  - target: { kind: StatefulSet, name: mongo }
+    patch: |-
+      - op: replace
+        path: /spec/volumeClaimTemplates/0/spec/resources/requests/storage
+        value: 20Gi
+  - target: { kind: Deployment }
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: Always
