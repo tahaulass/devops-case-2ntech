@@ -5,9 +5,9 @@
 ## Candidate Information
 
 - **Full name:** Taha Ulaş
-- **Repository URL:** <!-- FILL: https://github.com/<user>/devops-case-2ntech -->
-- **Completion date:** <!-- FILL -->
-- **Target environment used:** Local Kubernetes – Docker Desktop (Windows 11 + WSL2, built-in Kubernetes, kubeadm). CI deploys the same manifests to an ephemeral kind cluster on every push.
+- **Repository URL:** https://github.com/tahaulass/devops-case-2ntech
+- **Completion date:** 6 November 2026
+- **Target environment used:** Local Kubernetes – Docker Desktop (Windows 11 + WSL2, built-in Kubernetes v1.36.1, kubeadm provisioning). CI deploys the same manifests to an ephemeral kind cluster on every push.
 
 ---
 
@@ -107,7 +107,8 @@ A Deployment for MongoDB was rejected (no stable identity, two pods could mount 
 - **Backend process:** keeps running (the starter crashed). The driver retries server selection for 5 s per operation and reconnects automatically when MongoDB returns.
 - **Requests:** DB operations fail fast with **503 "database unavailable, please retry"** (not 500, not a hang); `GET /api/healthcheck` (UI status) still answers.
 - **Readiness:** `/readyz` pings MongoDB → 503 → pods are removed from the Service endpoints, so the Ingress returns 503 quickly instead of routing to broken pods.
-- **Liveness:** `/healthz` does **not** depend on MongoDB → no restart storm; when MongoDB comes back, readiness turns green and traffic resumes by itself. Verified in CI (`scripts/e2e-k8s.sh` deletes `mongo-0` and checks the API recovers with backend restart count 0).
+- **Liveness:** `/healthz` does **not** depend on MongoDB → no restart storm; when MongoDB comes back, readiness turns green and traffic resumes by itself.
+- **Start-up order:** found during the deployment – the backend pods started before MongoDB and stayed not-ready forever, because the Node.js driver keeps a closed topology after a failed *first* connect. The backend now connects in a retry loop and replaces a failed client with a new one every 5 s, so the start order of backend and MongoDB no longer matters (details in [findings F1](docs/findings.md)). Verified in CI (`scripts/e2e-k8s.sh` deletes `mongo-0` and checks the API recovers with backend restart count 0).
 - **Additional measures:** bounded pool (`maxPoolSize`) and timeouts, graceful shutdown, ETL/backup jobs fail with non-zero exit (retried by `backoffLimit`, alerted), alerts `MongoNotReady` and `BackendNoReadyPods`. For production: replica set (automatic failover in seconds), a friendly error/retry in the UI, a circuit breaker and a PDB for MongoDB.
 
 ## 11. Faulty Deployment and Rollback
@@ -151,13 +152,14 @@ UpdateOne({"github_id": repo["id"]},
 ```
 - **Unique key:** `github_id` = the numeric GitHub repository `id`. Unlike `full_name`, it does not change when a repository is renamed or transferred (covered by a unit test). A **unique index** `uniq_github_id` guarantees no duplicates even with concurrent runs; `concurrencyPolicy: Forbid` prevents overlapping runs anyway.
 - First run → `upserted` (inserted); later runs → matched and updated (`$set` refreshes stars, forks, etc.; `etl_sync_count` increments; `etl_first_seen_at` keeps the original value).
-- **Evidence:** `docs/screenshots/10-etl-first-load.png` (run 1: `inserted: 5`, `documents_after: 5`) and `docs/screenshots/11-etl-update-without-duplicate.png` (run 2: `inserted: 0`, `updated: 5`, `documents_before: 5`, `documents_after: 5`, `duplicates_created: 0`, and in mongosh `etl_sync_count: 2` with an unchanged `etl_first_seen_at`). The CI e2e job asserts the same automatically.
+- **Evidence:** `docs/screenshots/10-etl-first-load.png` – the first, automatically scheduled CronJob run (`github-etl-29899440`): `inserted: 5`, `documents_before: 0`, `documents_after: 5`. `docs/screenshots/11-etl-update-without-duplicate.png` – a second, manual run with the same repositories (`etl-run-2`): `inserted: 0`, `updated: 5`, `documents_before: 5`, `documents_after: 5`, `duplicates_created: 0`. `docs/screenshots/11b-etl-db-sync-count.png` – mongosh shows still 5 documents, each with `etl_sync_count: 2`. The CI e2e job asserts the same automatically.
+- **Real-world proof of the key choice:** the configured repository `facebook/react` is now stored as `react/react` – the repository was transferred on GitHub since it was added to the list. Its `github_id` (10270250) did not change, so the ETL updated the existing document. Keying on `full_name` would have created a duplicate.
 
 ## 16. Backup and Restore Approach
 
 - **Method / location:** `mongodump --archive --gzip` by CronJob `mongo-backup` to a dedicated PVC `mongo-backups` (separate from the DB volume), with SHA-256 checksum and a `.meta` file of per-collection document counts. Restore: Job `mongo-restore` (`mongorestore --drop --nsInclude 'employees.*'`).
 - **Frequency / retention:** every 6 h + on demand before risky changes; retention 7 days (pruned by the job).
-- **Targets:** RPO ≤ 6 h; RTO ≤ 15 min. **Measured restore duration:** <!-- FILL: from the restore log `duration_seconds` --> s for the restore itself, <!-- FILL --> s end-to-end including Job start-up (see `docs/screenshots/17-restore-executed.png`).
+- **Targets:** RPO ≤ 6 h; RTO ≤ 15 min. **Measured restore duration:** 2 s for checksum verification + `mongorestore` + count verification (restore log `duration_seconds`), 5.8 s end-to-end including Job creation and pod start-up (`Measure-Command`, see `docs/screenshots/17-restore-executed.png` and `17a-restore-duration.png`).
 - **Integrity verification:** `.partial` file + atomic rename (no half-written backups), `gzip -t`, minimum size, checksum verified before every restore, post-restore document counts compared with the counts recorded at backup time (Job fails on mismatch), and the record visible again in the UI. The full drill (create → backup → drop → verify gone → restore → verify back) runs in every CI pipeline.
 - **Production changes:** copy every archive to object storage in another region/account with versioning + Object Lock and KMS encryption; replica set + oplog/PITR backups (Percona Backup for MongoDB or Atlas continuous backup) for an RPO of minutes; dedicated `backup` user; weekly automated restore drill into a scratch instance with alerting; backup-age and size alerts (already defined).
 

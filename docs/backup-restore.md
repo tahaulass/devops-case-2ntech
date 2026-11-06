@@ -21,7 +21,7 @@ Evidence screenshots are referenced from [`SUBMISSION_EVIDENCE.md`](../SUBMISSIO
 | | Target | Measured |
 | --- | --- | --- |
 | RPO | ≤ 6 h (scheduled backup interval); 0 for changes made right after an on-demand backup | Scenario: 0 data loss (backup taken right after the record was created) |
-| RTO | ≤ 15 min (detect + start restore Job + restore + verify) | Restore Job: **<!-- FILL: seconds from `restore finished` log -->** s; end-to-end incl. pod start: **<!-- FILL -->** s |
+| RTO | ≤ 15 min (detect + start restore Job + restore + verify) | Restore Job: **2 s** (checksum + `mongorestore` + count verification); end-to-end incl. Job creation and pod start: **5.8 s** |
 
 ## 3. Backup procedure
 
@@ -81,16 +81,16 @@ How is it verified that the backup is not corrupted or incomplete?
 
 ## 6. End-to-end test result
 
-Date and result of the executed scenario: **<!-- FILL: date -->**, Docker Desktop Kubernetes. The same scenario is executed automatically in every CI run (`scripts/e2e-k8s.sh`, job `e2e-deploy`).
+Date and result of the executed scenario: **6 November 2026, successful**, Docker Desktop Kubernetes v1.36.1. Restored archive `mongo-20261106T122450Z.archive.gz` (2478 bytes); verification `employees.records` 2/2 and `employees.github_repositories` 5/5; the record came back with the same `_id` (`6aedc6c7c48572d81a837724`). The same scenario is executed automatically in every CI run (`scripts/e2e-k8s.sh`, job `e2e-deploy`).
 
 | # | Step | Result | Evidence |
 | --- | --- | --- | --- |
-| 1 | Record created | "Backup Test" created via the UI | `docs/screenshots/13-backup-record-created.png` |
-| 2 | Backup taken | `mongo-backup-manual-1` completed, archive on PVC `mongo-backups` | `docs/screenshots/14-backup-taken.png` |
+| 1 | Record created | "Backup Test" created via the UI, `_id 6aedc6c7c48572d81a837724` | `docs/screenshots/13-backup-record-created.png`, `13b-backup-record-in-db.png` |
+| 2 | Backup taken | `backup-manual-1` completed in 2 s, archive + `.sha256` + `.meta` on PVC `mongo-backups` (next to the earlier scheduled backup) | `docs/screenshots/14-backup-taken.png`, `14b-backup-files-on-pvc.png` |
 | 3 | Collection dropped | `db.records.drop()` → `true` | `docs/screenshots/15-collection-dropped.png` |
-| 4 | Data confirmed gone | Record List empty, `countDocuments()` = 0 | `docs/screenshots/16-data-missing-after-drop.png` |
-| 5 | Restored from backup | `restore finished and verified` | `docs/screenshots/17-restore-executed.png` |
-| 6 | Data confirmed back | Same record (same `_id`) in UI and DB | `docs/screenshots/18-data-restored-verified.png` |
+| 4 | Data confirmed gone | Record List empty, `countDocuments()` = 0 | `docs/screenshots/16-data-missing-after-drop.png`, `16b-db-empty-after-drop.png` |
+| 5 | Restored from backup | checksum OK, counts match, `restore finished and verified` (2 s; 5.8 s end-to-end) | `docs/screenshots/17-restore-executed.png`, `17a-restore-duration.png` |
+| 6 | Data confirmed back | Same record (same `_id`) in UI and DB, no application restart | `docs/screenshots/18-data-restored-verified.png`, `18b-db-restored.png` |
 
 ## 7. Known limitations
 
