@@ -170,4 +170,4 @@ Runbook: [docs/backup-restore.md](docs/backup-restore.md) · Evidence: [SUBMISSI
 ## Additional Notes
 
 - Advanced criteria implemented: **Packaging & environment management** (Kustomize dev/prod overlays), **Advanced security** (NetworkPolicies, Pod Security restricted, Trivy, SBOM, gitleaks, SHA-pinned actions), **High availability & scaling** (PDBs, topology spread, rolling updates with `maxUnavailable: 0`, HPA in prod), **Observability** (Prometheus metrics, alert rules, structured logs) and an automated **DR drill** in CI. Designed but not implemented: Terraform, GitOps, off-site backups.
-- AI assistance (Claude) was used while writing code and documentation; all design decisions, commands and results were reviewed and executed by me.
+- AI assistance (Claude) was used for writing code and documentation. I reviewed the decisions and ran every deployment step, test and the backup/restore scenario myself; the screenshots are from my environment.

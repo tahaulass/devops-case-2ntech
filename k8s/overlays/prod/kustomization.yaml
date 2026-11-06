@@ -8,13 +8,13 @@ resources:
 
 images:
   - name: backend
-    newName: ghcr.io/OWNER/devops-case-backend
-    newTag: latest   # replaced by CI: kustomize edit set image ...:<git-sha>
+    newName: ghcr.io/tahaulass/devops-case-backend
+    newTag: latest   # pinned to the commit SHA by CI (kustomize edit set image ...:<git-sha>)
   - name: frontend
-    newName: ghcr.io/OWNER/devops-case-frontend
+    newName: ghcr.io/tahaulass/devops-case-frontend
     newTag: latest
   - name: etl
-    newName: ghcr.io/OWNER/devops-case-etl
+    newName: ghcr.io/tahaulass/devops-case-etl
     newTag: latest
 
 replicas:
