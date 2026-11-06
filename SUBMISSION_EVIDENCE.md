@@ -25,8 +25,13 @@ The same checks run automatically in CI (`e2e-deploy` job, see §5): API, ETL id
 
 ## 2. Docker
 
-- **Image build screenshot:** `docs/screenshots/06-docker-build-and-containers.png`
-- **Explanation:** The three images built locally from the multi-stage Dockerfiles, with their sizes: backend 64.6 MB, etl 48 MB, frontend 26 MB (the frontend runtime image contains only nginx and the static build, no Node.js). All images run as non-root users. The local docker-compose stack (`docker-compose.yml`) is provided for development; the target environment is Kubernetes (§3).
+- **Image build screenshot:** `docs/screenshots/06-docker-build-and-containers.png`, `docs/screenshots/06b-docker-build-output.png`
+- **Running containers screenshot:** `docs/screenshots/06c-docker-running-containers.png`
+- **Explanation:**
+  - `06`: the three images built locally from the multi-stage Dockerfiles, with their sizes: backend 64.6 MB, etl 48 MB, frontend 26 MB. The frontend runtime image contains only nginx and the static build, no Node.js.
+  - `06b`: a `docker build` of the ETL image showing the multi-stage build (`build` stage installs the dependencies, `stage-1` copies only the result, creates the non-root user `etl` with uid 10001 and adds `etl.py`). Layers are reused from the build cache.
+  - `06c`: `docker ps` on the Docker Desktop engine that runs the Kubernetes pods: the running containers of `mongo-0`, both `backend` pods, the `frontend` pod and the ingress-nginx controller, all `Up` for several hours. Image `7b1080523a1f` is the same frontend image id as in `06`.
+  - The local docker-compose stack (`docker-compose.yml`) is provided for development; the target environment is Kubernetes (§3).
 
 ## 3. Kubernetes
 

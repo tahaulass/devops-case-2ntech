@@ -206,7 +206,13 @@ jobs:
         run: ./scripts/create-secrets.sh
 
       - name: Deploy (dev overlay)
-        run: kubectl apply -k k8s/overlays/dev
+        run: |
+          for attempt in 1 2 3 4 5 6; do
+            if kubectl apply -k k8s/overlays/dev; then exit 0; fi
+            echo "apply failed (attempt $attempt), retrying in 10s"
+            sleep 10
+          done
+          exit 1
 
       - name: End-to-end checks (API, ETL idempotency, backup/restore, resilience)
         run: ./scripts/e2e-k8s.sh
