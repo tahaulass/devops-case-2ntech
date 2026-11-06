@@ -19,6 +19,10 @@ FROM nginxinc/nginx-unprivileged:stable-alpine
 # but the proxy also keeps `kubectl port-forward` to the frontend fully functional.
 ENV BACKEND_URL=http://backend:5050 \
     NGINX_ENTRYPOINT_LOCAL_RESOLVERS=1
+# Apply the latest Alpine security patches on top of the base image: the vulnerability scan
+# in CI fails on fixable CRITICAL CVEs, and base images are not rebuilt every day.
+USER root
+RUN apk upgrade --no-cache
 COPY nginx/default.conf.template /etc/nginx/templates/default.conf.template
 COPY --from=build /app/build /usr/share/nginx/html
 # nginx-unprivileged runs as uid 101 and listens on 8080.

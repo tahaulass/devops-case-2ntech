@@ -11,13 +11,15 @@ function New-RandomPassword {
   [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
   -join ($bytes | ForEach-Object { $chars[$_ % $chars.Length] })
 }
+# --ignore-not-found: kubectl prints nothing (and no error) when the object does not exist.
+# Avoids Windows PowerShell 5.1 turning kubectl's "NotFound" stderr into a terminating error.
 function Test-Secret($name) {
-  kubectl -n $Namespace get secret $name 2>$null | Out-Null
-  return $LASTEXITCODE -eq 0
+  $found = kubectl -n $Namespace get secret $name --ignore-not-found -o name
+  return [bool]$found
 }
 
-kubectl get ns $Namespace 2>$null | Out-Null
-if ($LASTEXITCODE -ne 0) { kubectl create ns $Namespace | Out-Null }
+$ns = kubectl get namespace $Namespace --ignore-not-found -o name
+if (-not $ns) { kubectl create namespace $Namespace | Out-Null }
 
 $mongoHost = "mongo-0.mongo.$Namespace.svc.cluster.local:27017"
 
