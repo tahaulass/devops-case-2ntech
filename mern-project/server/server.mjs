@@ -1,6 +1,6 @@
 import config from "./config.mjs";
 import logger from "./logger.mjs";
-import { client, db, pingDb } from "./db/conn.mjs";
+import { db, pingDb, connectWithRetry, closeDb } from "./db/conn.mjs";
 import { createApp } from "./app.mjs";
 
 let shuttingDown = false;
@@ -16,13 +16,9 @@ const server = app.listen(config.port, () => {
   logger.info("server listening", { port: config.port, db: config.dbName });
 });
 
-// Try an initial connection only to log the result; failure is NOT fatal.
-// The process keeps serving /healthz, reports not-ready on /readyz and recovers by itself
-// once MongoDB becomes reachable.
-client
-  .connect()
-  .then(() => logger.info("connected to mongodb"))
-  .catch((e) => logger.error("initial mongodb connection failed, will retry lazily", { error: e.message }));
+// Connect in the background. A MongoDB outage at start-up is NOT fatal: the process keeps
+// serving /healthz, reports not-ready on /readyz and becomes ready once MongoDB is reachable.
+connectWithRetry();
 
 // Graceful shutdown: Kubernetes sends SIGTERM on rollout/scale-down. Stop reporting ready,
 // finish in-flight requests, close the Mongo pool, then exit.
@@ -36,7 +32,7 @@ const shutdown = (signal) => {
   }, config.shutdownTimeoutMs);
   force.unref();
   server.close(async () => {
-    await client.close().catch(() => {});
+    await closeDb();
     logger.info("shutdown complete");
     process.exit(0);
   });
