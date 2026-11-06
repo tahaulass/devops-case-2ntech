@@ -15,7 +15,8 @@ describe("MERN application main flows", () => {
     cy.get("#name").type(name);
     cy.get("#position").type("Position1");
     cy.get("#positionIntern").click({ force: true });
-    cy.contains("Create person").click({ force: true });
+    // Target the submit button itself (text-based selectors can match headings too).
+    cy.get('input[type="submit"][value="Create person"]').click();
     cy.location("pathname").should("eq", "/records");
     cy.contains("td", name).should("exist");
   });
@@ -25,7 +26,8 @@ describe("MERN application main flows", () => {
     cy.contains("tr", name).contains("Edit").click();
     cy.get("#position").clear().type("Position2");
     cy.get("#positionSenior").click({ force: true });
-    cy.contains("Update Record").click({ force: true });
+    // "Update Record" is also the page heading (<h3>), so select the submit button explicitly.
+    cy.get('input[type="submit"][value="Update Record"]').click();
     cy.location("pathname").should("eq", "/records");
     cy.contains("tr", name).should("contain", "Position2").and("contain", "Senior");
   });
